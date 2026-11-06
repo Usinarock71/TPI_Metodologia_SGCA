@@ -1,100 +1,112 @@
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import datetime
 
 app = FastAPI()
 
-# BASE DE DATOS SIMULADA (Smell: Estado global, falta de persistencia real y Primitive Obsession)
-db_solicitudes = []
-contador_id = 1
+# ==========================================
+# REFACTORING 1: Introduce Parameter Object (y Primitive Obsession fix)
+# Crear clases (Modelos DTO) para estructurar los datos en lugar de variables sueltas.
+# ==========================================
+class SolicitudDTO(BaseModel):
+    nombre_estudiante: str
+    apellido_estudiante: str
+    dni: str
+    email: str
+    matricula: str
+    tipo_certificado: str
+    prioridad: int
 
-# FUNCION 1: REGISTRAR SOLICITUD
-# Smell detectado: Long Parameter List (lista de parometros inmensa)
-# Smell detectado: Poor Naming (variables n, a, doc, corr, mat, tc, prio)
-# Smell detectado: Long Method (hace validacion, creacion, guardado, log y notificacion todo junto)
+class Solicitud(BaseModel):
+    id_sol: int
+    estudiante_completo: str
+    email: str
+    tipo_certificado: str
+    estado: str
+    responsable: str | None = None
+    fecha: str
+
+# ==========================================
+# REFACTORING 2: Move Method / Separación de Responsabilidades (SRP)
+# Mover la lógica de la "Base de Datos" a su propia clase Repositorio.
+# ==========================================
+class RepositorioSolicitudes:
+    def __init__(self):
+        self.db = []
+        self.contador_id = 1
+    
+    # REFACTORING 3: Extract Method (Centralizamos la búsqueda duplicada)
+    def buscar_por_id(self, id_sol: int):
+        for s in self.db:
+            if s.id_sol == id_sol:
+                return s
+        return None
+
+    def guardar(self, solicitud_dto: SolicitudDTO) -> Solicitud:
+        nueva = Solicitud(
+            id_sol=self.contador_id,
+            estudiante_completo=f"{solicitud_dto.nombre_estudiante} {solicitud_dto.apellido_estudiante}",
+            email=solicitud_dto.email,
+            tipo_certificado=solicitud_dto.tipo_certificado,
+            estado="Pendiente",
+            fecha=str(datetime.datetime.now())
+        )
+        self.db.append(nueva)
+        self.contador_id += 1
+        return nueva
+
+# Instanciar el repositorio (Simulación de Inyección de Dependencias)
+repo = RepositorioSolicitudes()
+
+# ==========================================
+# REFACTORING 4: Extract Method (Desacoplamiento de infraestructura)
+# Extraer la simulación de envío de correos fuera de los endpoints.
+# ==========================================
+def notificar_estudiante(email: str, mensaje: str):
+    print(f"Audit Log: Enviando email a {email} -> {mensaje}")
+
+# ==========================================
+# CONTROLADORES HTTP
+# ==========================================
+
 @app.post("/registrar_solicitud")
-def registrar(n: str, a: str, doc: str, corr: str, mat: str, tc: str, prio: int):
-    global contador_id
+def registrar(solicitud: SolicitudDTO):
+    if solicitud.tipo_certificado not in ["Analitico", "Titulo", "Alumno Regular"]:
+        raise HTTPException(status_code=400, detail="Tipo de certificado invalido")
     
-    # Smell detectado: Duplicated code (validaciones manuales que se repetiran)
-    if len(n) == 0 or len(a) == 0 or len(doc) == 0:
-        raise HTTPException(status_code=400, detail="Faltan datos obligatorios")
-    
-    if tc not in ["Analitico", "Titulo", "Alumno Regular"]:
-        raise HTTPException(status_code=400, detail="Tipo de certificado erroneo")
-
-    # Smell detectado: Primitive Obsession (usar un diccionario suelto en vez de una Clase/Entidad)
-    nueva_solicitud = {
-        "id_sol": contador_id,
-        "nombre_estudiante": n,
-        "apellido_estudiante": a,
-        "dni": doc,
-        "email": corr,
-        "matricula": mat,
-        "tipo_certificado": tc,
-        "prioridad": prio,
-        "estado": "Pendiente",
-        "responsable": None,
-        "fecha": str(datetime.datetime.now())
-    }
-    
-    db_solicitudes.append(nueva_solicitud)
-    contador_id += 1
-    
-    # Smell detectado: Alto acoplamiento (logica de infraestructura harcodeada en la regla de negocio)
-    print(f"Simulando conexion SMTP... Enviando email a {corr} desde smtp.universidad.edu.ar")
+    nueva_solicitud = repo.guardar(solicitud)
+    notificar_estudiante(solicitud.email, "Tu solicitud fue registrada exitosamente")
     
     return {"msg": "Solicitud creada exitosamente", "data": nueva_solicitud}
 
-
-# FUNCION 2: CAMBIAR ESTADO
 @app.put("/estado/{id_sol}")
 def cambiar_estado(id_sol: int, nuevo_estado: str):
-    # Smell detectado: Duplicated Code (busqueda iterativa manual que se repite en otros endpoints)
-    encontrado = False
-    for s in db_solicitudes:
-        if s["id_sol"] == id_sol:
-            encontrado = True
-            # Lógica de negocio mezclada con el enrutamiento HTTP
-            if s["estado"] == "Finalizado":
-                raise HTTPException(status_code=400, detail="El tramite ya esta finalizado, no se puede cambiar")
-            if nuevo_estado not in ["Pendiente", "En Proceso", "Finalizado", "Rechazado"]:
-                raise HTTPException(status_code=400, detail="Estado invalido")
-            
-            s["estado"] = nuevo_estado
-            print(f"Audit log: Estado de la solicitud {id_sol} paso a {nuevo_estado}")
-            return {"msg": "Estado actualizado", "solicitud": s}
+    solicitud = repo.buscar_por_id(id_sol)
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
     
-    if not encontrado:
-        raise HTTPException(status_code=404, detail="Solicitud no existe en la base")
+    if solicitud.estado == "Finalizado":
+        raise HTTPException(status_code=400, detail="El tramite ya esta finalizado, no admite cambios")
+    if nuevo_estado not in ["Pendiente", "En Proceso", "Finalizado", "Rechazado"]:
+        raise HTTPException(status_code=400, detail="Estado invalido")
+        
+    solicitud.estado = nuevo_estado
+    return {"msg": "Estado actualizado", "solicitud": solicitud}
 
-
-# FUNCION 3: ASIGNAR RESPONSABLE
 @app.put("/responsable/{id_sol}")
 def asignar_responsable(id_sol: int, resp: str):
-    # Mas duplicacion de la logica de busqueda (Falta de cohesion)
-    for s in db_solicitudes:
-        if s["id_sol"] == id_sol:
-            s["responsable"] = resp
-            return {"msg": "Responsable asignado correctamente", "solicitud": s}
-    raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    solicitud = repo.buscar_por_id(id_sol)
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+        
+    solicitud.responsable = resp
+    return {"msg": "Responsable asignado correctamente", "solicitud": solicitud}
 
-
-# FUNCION 4: GENERAR REPORTE
 @app.get("/reportes")
 def generar_reporte(filtro_estado: str = None):
-    # Smell detectado: God Module (logica de filtrado, negocio y exportacion de archivos todo en el mismo lugar)
-    resultado = []
-    for s in db_solicitudes:
-        if filtro_estado:
-            if s["estado"] == filtro_estado:
-                resultado.append(s)
-        else:
-            resultado.append(s)
-    
-    # Simulando exportacion acoplada que viola el Principio de Responsabilidad Unica (SRP)
-    with open("reporte_temp.txt", "w") as file:
-        file.write("REPORTE DE SOLICITUDES ACADEMICAS\n")
-        for r in resultado:
-            file.write(f"ID: {r['id_sol']} - Tipo: {r['tipo_certificado']} - Estado: {r['estado']}\n")
-    
+    if filtro_estado:
+        resultado = [s for s in repo.db if s.estado == filtro_estado]
+    else:
+        resultado = repo.db
+        
     return {"total_registros": len(resultado), "items": resultado}
