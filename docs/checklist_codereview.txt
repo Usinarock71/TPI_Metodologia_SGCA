@@ -1,0 +1,33 @@
+=========================================================
+CHECKLIST DE CODE REVIEW - SGCA
+Trabajo Práctico Integrador - Metodología de Sistemas II
+Revisor: Tiziano Nahuel Caamaño
+=========================================================
+
+[ARQUITECTURA]
+[x] ¿Existe separación de responsabilidades (SRP)?
+    Observación: Se separó la lógica HTTP del acceso a datos mediante la clase RepositorioSolicitudes.
+
+[CLEAN CODE]
+[x] ¿Los nombres de variables/métodos son descriptivos?
+    Observación: Se eliminaron variables de una letra (n, a, tc) reemplazándolas por lenguaje de negocio (nombre_estudiante, tipo_certificado).
+[x] ¿Existen métodos demasiado largos (Long Method)?
+    Observación: El método registrar fue modularizado. La lógica de notificaciones se extrajo a otra función.
+
+[SOLID]
+[-] ¿Las dependencias fluyen hacia abstracciones?
+    Observación: Parcial. Se inyecta el repositorio, pero se recomienda a futuro usar interfaces formales (Abstracciones) en lugar de clases concretas.
+
+[REFACTORING]
+[x] ¿Se eliminó el código duplicado?
+    Observación: La búsqueda de solicitudes iterativas se centralizó en buscar_por_id, eliminando 3 bucles repetidos.
+
+[SEGURIDAD]
+[x] ¿Se validan correctamente las entradas?
+    Observación: Se implementó Pydantic (BaseModel) para validación estricta de tipos de datos.
+
+=========================================================
+DICTAMEN TÉCNICO:
+El refactoring solucionó el anti-patrón "Módulo Dios" y el "Long Parameter List". El código es cohesivo.
+Aprobado para esta iteración, quedando como deuda técnica menor la implementación de una base de datos física (SQL).
+=========================================================
